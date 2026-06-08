@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Weekly Tracker">
+<meta name="theme-color" content="#0f0f0f">
+<title>Weekly Tracker</title>
+
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='40' fill='%230f0f0f'/%3E%3Ctext x='90' y='115' font-size='80' text-anchor='middle' fill='%23c8b87a'%3E◎%3C/text%3E%3C/svg%3E">
+
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Weekly%20Accountability%20Tracker%22%2C%22short_name%22%3A%22Tracker%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230f0f0f%22%2C%22theme_color%22%3A%22%230f0f0f%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%2520viewBox%3D%270%2520010%2520180%2520180%27%253E%253Crect%2520width%3D%27180%27%2520height%3D%27180%27%2520fill%3D%27%25230f0f0f%27%2F%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #222222;
+    --border: rgba(255,255,255,0.08);
+    --border-md: rgba(255,255,255,0.14);
+    --text: #f0ede4;
+    --text-muted: #888880;
+    --text-dim: #555550;
+    --gold: #c8b87a;
+    --gold-dim: rgba(200,184,122,0.15);
+    --gold-border: rgba(200,184,122,0.3);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+    --score1: #E24B4A;
+    --score2: #EF9F27;
+    --score3: #1D9E75;
+    --score4: #378ADD;
+    --score5: #7F77DD;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  html, body, #root { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  #root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding-top: var(--safe-top);
+  }
+
+  button { font-family: var(--font); -webkit-tap-highlight-color: transparent; }
+  textarea { font-family: var(--font); -webkit-tap-highlight-color: transparent; }
+
+  ::-webkit-scrollbar { display: none; }
+  * { -ms-overflow-style: none; scrollbar-width: none; }
+
+  textarea:focus { outline: none; }
+
+  .spin {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const GOALS = [
+  { id: "morning_med", label: "Morning Meditation", icon: "☀︎" },
+  { id: "writing",     label: "Writing",            icon: "✍" },
+  { id: "reading",     label: "Reading",            icon: "◫" },
+  { id: "evening_med", label: "Evening Meditation", icon: "◑" },
+];
+
+const DAYS_SHORT  = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const SCORE_COLORS = ["#E24B4A","#EF9F27","#1D9E75","#378ADD","#7F77DD"];
+const SCORE_LABELS = ["Minimal","Partial","Solid","Strong","Complete"];
+
+const sc = (v) => v ? SCORE_COLORS[v-1] : null;
+
+function getWeekStart(d) {
+  const x = new Date(d);
+  x.setDate(x.getDate() - x.getDay());
+  x.setHours(0,0,0,0);
+  return x;
+}
+function tds(d) { return d.toISOString().split("T")[0]; }
+function weekDates(ws) {
+  return Array.from({length:7},(_,i) => {
+    const d = new Date(ws); d.setDate(d.getDate()+i); return d;
+  });
+}
+function fmtWeek(ws) {
+  const we = new Date(ws); we.setDate(we.getDate()+6);
+  const o = {month:"short",day:"numeric"};
+  return `${ws.toLocaleDateString("en-US",o)} – ${we.toLocaleDateString("en-US",{...o,year:"numeric"})}`;
+}
+function load(k) { try { const s=localStorage.getItem(k); return s?JSON.parse(s):null; } catch { return null; } }
+function save(k,v) { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} }
+
+// ── API key gate ─────────────────────────────────────────────────────────────
+function APISetup({ onSave }) {
+  const [key, setKey] = useState("");
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"2rem 1.5rem",gap:"1.5rem"}}>
+      <div style={{width:56,height:56,borderRadius:"50%",background:sc(5)+"22",border:`1.5px solid ${sc(5)}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:24}}>◎</div>
+      <div style={{textAlign:"center"}}>
+        <h2 style={{fontSize:20,fontWeight:600,marginBottom:8,color:"var(--text)"}}>Weekly Tracker</h2>
+        <p style={{fontSize:13,color:"var(--text-muted)",lineHeight:1.6,maxWidth:280}}>Enter your Anthropic API key to enable AI weekly integrations. Your key is stored only on this device.</p>
+      </div>
+      <div style={{width:"100%",maxWidth:320}}>
+        <input
+          type="password"
+          value={key}
+          onChange={e=>setKey(e.target.value)}
+          placeholder="sk-ant-..."
+          style={{width:"100%",padding:"12px 14px",borderRadius:"var(--radius-sm)",border:"1px solid var(--border-md)",background:"var(--surface)",color:"var(--text)",fontSize:14}}
+        />
+        <p style={{fontSize:11,color:"var(--text-dim)",marginTop:6,lineHeight:1.5}}>Get your key at console.anthropic.com. The tracker works without it — you just won't be able to generate AI weekly integrations.</p>
+      </div>
+      <div style={{display:"flex",gap:10,width:"100%",maxWidth:320}}>
+        <button onClick={()=>onSave("")} style={{flex:1,padding:"11px",borderRadius:"var(--radius-sm)",border:"1px solid var(--border-md)",background:"transparent",color:"var(--text-muted)",fontSize:13,cursor:"pointer"}}>
+          Skip for now
+        </button>
+        <button onClick={()=>{ if(key.trim()) onSave(key.trim()); }} disabled={!key.trim()} style={{flex:1,padding:"11px",borderRadius:"var(--radius-sm)",border:"none",background:"var(--gold)",color:"#1a1600",fontSize:13,fontWeight:600,cursor:key.trim()?"pointer":"not-allowed",opacity:key.trim()?1:0.5}}>
+          Save & Continue
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Score dot button ──────────────────────────────────────────────────────────
+function ScoreDot({ val, current, onClick }) {
+  const active = val <= current;
+  const isTip  = val === current;
+  return (
+    <button onClick={onClick} style={{
+      width:30,height:30,borderRadius:"50%",
+      border:`1.5px solid ${isTip ? sc(current) : active ? sc(current)+"55" : "rgba(255,255,255,0.12)"}`,
+      background: isTip ? sc(current) : active ? sc(current)+"28" : "transparent",
+      color: isTip ? "#fff" : active ? sc(current) : "rgba(255,255,255,0.25)",
+      fontSize:11,fontWeight:600,cursor:"pointer",
+      display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,
+      transition:"all 0.12s",
+    }}>{val}</button>
+  );
+}
+
+// ── Day pill ──────────────────────────────────────────────────────────────────
+function DayPill({ date, index, selected, isToday, hasScore, hasJournal, onSelect }) {
+  return (
+    <button onClick={()=>onSelect(index)} style={{
+      flexShrink:0,minWidth:50,padding:"7px 4px",
+      borderRadius:"var(--radius-sm)",
+      border:selected ? `1.5px solid var(--gold)` : isToday ? "1px solid var(--border-md)" : "1px solid var(--border)",
+      background:selected ? "var(--gold-dim)" : isToday ? "var(--surface2)" : "var(--surface)",
+      cursor:"pointer",textAlign:"center",
+    }}>
+      <div style={{fontSize:10,fontWeight:500,color:selected?"var(--gold)":"var(--text-muted)",letterSpacing:"0.3px"}}>{DAYS_SHORT[index]}</div>
+      <div style={{fontSize:17,fontWeight:600,color:selected?"var(--gold)":"var(--text)",lineHeight:1.3}}>{date.getDate()}</div>
+      <div style={{display:"flex",justifyContent:"center",gap:3,marginTop:3,height:6}}>
+        {hasScore  && <div style={{width:5,height:5,borderRadius:"50%",background:sc(hasScore)}}/>}
+        {hasJournal && <div style={{width:5,height:5,borderRadius:"50%",background:"var(--text-dim)"}}/>}
+      </div>
+    </button>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App() {
+  const today     = new Date();
+  const todayStr  = tds(today);
+
+  const [apiKey,          setApiKey]          = useState(null);
+  const [weekStart,       setWeekStart]       = useState(getWeekStart(today));
+  const [selDay,          setSelDay]          = useState(today.getDay());
+  const [scores,          setScores]          = useState({});
+  const [journals,        setJournals]        = useState({});
+  const [threeGoodThings, setThreeGoodThings] = useState({});
+  const [integrations,    setIntegrations]    = useState({});
+  const [tab,             setTab]             = useState("tracker");
+  const [generating,      setGenerating]      = useState(false);
+  const [genError,        setGenError]        = useState("");
+  const [showApiEdit,     setShowApiEdit]     = useState(false);
+
+  // Load everything from localStorage on mount
+  useEffect(() => {
+    const k = load("wt_apikey");
+    setApiKey(k ?? ""); // empty string = user skipped, null = not yet shown setup
+    setScores(load("wt_scores") || {});
+    setJournals(load("wt_journals") || {});
+    setThreeGoodThings(load("wt_tgt") || {});
+    setIntegrations(load("wt_integrations") || {});
+  }, []);
+
+  const saveApiKey = (k) => { setApiKey(k); save("wt_apikey", k); setShowApiEdit(false); };
+
+  const setScore = (ds, gid, val) => {
+    setScores(prev => {
+      const key = `${ds}_${gid}`;
+      const next = {...prev, [key]: prev[key]===val ? 0 : val};
+      save("wt_scores", next);
+      return next;
+    });
+  };
+  const setJournal = (ds, txt) => {
+    setJournals(prev => { const next={...prev,[ds]:txt}; save("wt_journals",next); return next; });
+  };
+  const setThing = (ds, idx, txt) => {
+    setThreeGoodThings(prev => {
+      const day = [...(prev[ds] || ["","",""])];
+      day[idx] = txt;
+      const next = {...prev, [ds]: day};
+      save("wt_tgt", next);
+      return next;
+    });
+  };
+
+  const getScore   = (ds,gid) => scores[`${ds}_${gid}`] || 0;
+  const getDaySum  = (ds) => GOALS.reduce((t,g)=>t+getScore(ds,g.id),0);
+  const getDayAvg  = (ds) => { const s=getDaySum(ds); return s>0?Math.round(s/4):0; };
+  const getJournal = (ds) => journals[ds] || "";
+  const getThings  = (ds) => threeGoodThings[ds] || ["","",""];
+  const hasThings  = (ds) => (threeGoodThings[ds] || []).some(t => t.trim().length > 0);
+
+  const wdates   = weekDates(weekStart);
+  const weekKey  = tds(weekStart);
+  const wMax     = 7*4*5;
+  const wTotal   = wdates.reduce((t,d)=>t+getDaySum(tds(d)),0);
+  const wPct     = Math.round((wTotal/wMax)*100);
+  const isCurWk  = weekKey === tds(getWeekStart(today));
+  const selDate  = wdates[selDay];
+  const selDs    = tds(selDate);
+  const isToday  = selDs === todayStr;
+  const barColor = wPct>=80?"#7F77DD":wPct>=60?"#378ADD":wPct>=40?"#1D9E75":"#EF9F27";
+
+  const navWeek = (dir) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + dir*7);
+    setWeekStart(d);
+    setSelDay(0);
+    if (tab==="weekly") setTab("tracker");
+  };
+
+  // ── Generate weekly integration ───────────────────────────────────────────
+  const generate = async () => {
+    if (!apiKey) { setShowApiEdit(true); return; }
+    setGenerating(true);
+    setGenError("");
+    const entries = wdates.map((date,i) => {
+      const ds = tds(date);
+      const gs = GOALS.map(g => { const s=getScore(ds,g.id); return s>0?`${g.label}: ${s}/5 (${SCORE_LABELS[s-1]})`:null; }).filter(Boolean);
+      const j  = getJournal(ds);
+      const tgt = getThings(ds).filter(t=>t.trim());
+      const tgtStr = tgt.length ? tgt.map((t,i)=>`  ${i+1}. ${t}`).join("\n") : "  (none recorded)";
+      return `${DAYS_SHORT[i]} ${date.toLocaleDateString("en-US",{month:"short",day:"numeric"})}\nGoals: ${gs.length?gs.join(", "):"nothing logged"}\nScore: ${getDaySum(ds)}/20\nThree Good Things:\n${tgtStr}\nJournal: ${j||"(no entry)"}`;
+    }).join("\n\n");
+
+    const prompt = `You are helping Dylan — an MBA student at UT Austin, Marine Corps veteran, marathon runner (30 marathons, 17 countries), and co-founder — with his weekly accountability review.
+
+Week of ${fmtWeek(weekStart)} | Weekly score: ${wTotal}/${wMax} (${wPct}%)
+
+${entries}
+
+Write a weekly integration in four sections using exactly these markdown headers:
+
+## This Week in Review
+2–3 honest sentences on the overall arc and texture of the week. Don't sugarcoat, don't catastrophize.
+
+## What Moved the Needle
+Specific wins and moments of genuine engagement. Draw on the Three Good Things entries and journal where you can — these are the signal. Be concrete.
+
+## Patterns & Honest Observations
+What do the scores, Three Good Things, and journal words reveal together? Be direct about friction, inconsistency, or breakthroughs. Look for themes across the Three Good Things entries — recurring sources of energy or gratitude are worth naming.
+
+## Going Into Next Week
+2–3 grounded intentions based on what this week revealed. Not a wish list — actual carry-forwards.
+
+Write in second person. No filler. Tone: trusted advisor who read everything carefully. Dylan values directness over encouragement.`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
+      const text = data.content?.map(b=>b.text||"").join("") || "";
+      setIntegrations(prev => { const next={...prev,[weekKey]:text}; save("wt_integrations",next); return next; });
+      setTab("weekly");
+    } catch(e) {
+      setGenError(e.message || "Something went wrong. Check your API key.");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // ── Render markdown ───────────────────────────────────────────────────────
+  const renderMd = (text) => {
+    if (!text) return null;
+    return text.split(/\n/).map((line,i) => {
+      if (line.startsWith("## ")) return (
+        <div key={i} style={{marginTop:i===0?0:"1.5rem",marginBottom:"0.5rem",paddingBottom:"0.4rem",borderBottom:"1px solid var(--border)",fontSize:13,fontWeight:600,color:"var(--gold)",letterSpacing:"0.5px",textTransform:"uppercase"}}>
+          {line.replace(/^## /,"")}
+        </div>
+      );
+      if (!line.trim()) return null;
+      return <p key={i} style={{fontSize:14,lineHeight:1.75,color:"var(--text)",marginBottom:"0.5rem"}}>{line}</p>;
+    });
+  };
+
+  // ── Show API setup if not yet configured ──────────────────────────────────
+  if (apiKey === null) return (
+    <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+      <APISetup onSave={saveApiKey}/>
+    </div>
+  );
+
+  if (showApiEdit) return (
+    <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+      <APISetup onSave={saveApiKey}/>
+    </div>
+  );
+
+  // ── Main layout ───────────────────────────────────────────────────────────
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      {/* Top bar */}
+      <div style={{padding:"14px 16px 10px",borderBottom:"1px solid var(--border)",background:"var(--bg)",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <div style={{fontSize:16,fontWeight:700,letterSpacing:"-0.3px",color:"var(--text)"}}>Weekly Tracker</div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <button onClick={()=>navWeek(-1)} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border-md)",background:"var(--surface)",color:"var(--text)",fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+            <span style={{fontSize:11,color:"var(--text-muted)",minWidth:140,textAlign:"center"}}>{fmtWeek(weekStart)}</span>
+            <button onClick={()=>navWeek(1)} style={{width:32,height:32,borderRadius:8,border:"1px solid var(--border-md)",background:"var(--surface)",color:"var(--text)",fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+          </div>
+          {!isCurWk && (
+            <button onClick={()=>{setWeekStart(getWeekStart(today));setSelDay(today.getDay());}} style={{fontSize:11,padding:"4px 8px",borderRadius:6,border:"1px solid var(--gold-border)",background:"var(--gold-dim)",color:"var(--gold)",cursor:"pointer"}}>
+              Today
+            </button>
+          )}
+        </div>
+
+        {/* Progress bar */}
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{flex:1,height:4,background:"var(--surface2)",borderRadius:2,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${wPct}%`,background:barColor,borderRadius:2,transition:"width 0.4s ease"}}/>
+          </div>
+          <span style={{fontSize:12,fontWeight:600,color:barColor,minWidth:36,textAlign:"right"}}>{wPct}%</span>
+          <span style={{fontSize:11,color:"var(--text-dim)"}}>{wTotal}/{wMax}</span>
+        </div>
+
+        {/* Day dots row */}
+        <div style={{display:"flex",gap:4,marginTop:10,justifyContent:"space-between"}}>
+          {wdates.map((date,i) => {
+            const ds = tds(date);
+            const dayAvg = getDayAvg(ds);
+            const hasJ = !!getJournal(ds);
+            return (
+              <button key={i} onClick={()=>{setSelDay(i);}} style={{
+                flex:1,padding:"5px 2px",borderRadius:7,textAlign:"center",cursor:"pointer",
+                border:selDay===i?`1px solid var(--gold)`:"1px solid transparent",
+                background:selDay===i?"var(--gold-dim)":"transparent",
+              }}>
+                <div style={{fontSize:9,fontWeight:500,color:selDay===i?"var(--gold)":"var(--text-dim)",marginBottom:2}}>{DAYS_SHORT[i]}</div>
+                <div style={{width:8,height:8,borderRadius:"50%",margin:"0 auto",background:dayAvg>0?sc(dayAvg):"var(--border)",border:tds(date)===todayStr&&dayAvg===0?"1px solid var(--text-dim)":dayAvg>0?`1px solid ${sc(dayAvg)}55`:"1px solid var(--border)"}}/>
+                {hasJ && <div style={{width:3,height:3,borderRadius:"50%",background:"var(--text-dim)",margin:"2px auto 0"}}/>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{display:"flex",borderBottom:"1px solid var(--border)",background:"var(--bg)",flexShrink:0}}>
+        {["tracker","journal","weekly"].map(t => (
+          <button key={t} onClick={()=>setTab(t)} style={{
+            flex:1,padding:"11px 4px",fontSize:12,fontWeight:tab===t?600:400,
+            color:tab===t?"var(--gold)":"var(--text-muted)",
+            background:"none",border:"none",cursor:"pointer",
+            borderBottom:tab===t?"2px solid var(--gold)":"2px solid transparent",
+            letterSpacing:"0.2px",
+          }}>
+            {t==="tracker"?"Tracker":t==="journal"?"Journal":"Weekly Review"}
+          </button>
+        ))}
+      </div>
+
+      {/* Day selector strip */}
+      {(tab==="tracker"||tab==="journal") && (
+        <div style={{display:"flex",gap:5,padding:"10px 14px 8px",overflowX:"auto",background:"var(--bg)",flexShrink:0}}>
+          {wdates.map((date,i) => {
+            const ds = tds(date);
+            const dayAvg = getDayAvg(ds);
+            return (
+              <DayPill key={i} date={date} index={i} selected={selDay===i} isToday={tds(date)===todayStr}
+                hasScore={dayAvg} hasJournal={!!getJournal(ds)||hasThings(ds)} onSelect={setSelDay}/>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Scrollable content */}
+      <div style={{flex:1,overflowY:"auto",padding:"0 0 calc(1rem + var(--safe-bottom))"}}>
+
+        {/* ── TRACKER TAB ── */}
+        {tab==="tracker" && (
+          <div style={{padding:"12px 14px"}}>
+            <div style={{background:"var(--surface)",borderRadius:"var(--radius)",border:`1px solid ${isToday?"var(--gold-border)":"var(--border)"}`,overflow:"hidden"}}>
+              <div style={{padding:"12px 14px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",background:"var(--surface2)"}}>
+                <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>
+                  {selDate.toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}
+                  {isToday && <span style={{fontSize:10,fontWeight:500,color:"var(--gold)",marginLeft:8,padding:"2px 6px",background:"var(--gold-dim)",borderRadius:4}}>TODAY</span>}
+                </span>
+                <span style={{fontSize:12,color:"var(--text-muted)"}}>{getDaySum(selDs)}/20</span>
+              </div>
+              {GOALS.map((goal,gi) => {
+                const cur = getScore(selDs,goal.id);
+                return (
+                  <div key={goal.id} style={{
+                    padding:"14px",
+                    borderBottom:gi<GOALS.length-1?"1px solid var(--border)":"none",
+                    background:cur>0?sc(cur)+"0a":"transparent",
+                  }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:cur>0?8:0}}>
+                      <span style={{fontSize:14,color:"var(--text)",display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:16}}>{goal.icon}</span>
+                        {goal.label}
+                      </span>
+                      {cur>0 && <span style={{fontSize:11,fontWeight:600,color:sc(cur),padding:"2px 8px",background:sc(cur)+"22",borderRadius:20}}>{SCORE_LABELS[cur-1]}</span>}
+                    </div>
+                    <div style={{display:"flex",gap:8,marginTop:10}}>
+                      {[1,2,3,4,5].map(v=>(
+                        <ScoreDot key={v} val={v} current={cur} onClick={()=>setScore(selDs,goal.id,v)}/>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legend */}
+            <div style={{display:"flex",gap:12,flexWrap:"wrap",marginTop:16,padding:"0 2px"}}>
+              {SCORE_LABELS.map((l,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"var(--text-muted)"}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:sc(i+1)}}/>
+                  {i+1} — {l}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── JOURNAL TAB ── */}
+        {tab==="journal" && (
+          <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:12}}>
+
+            {/* Three Good Things card */}
+            <div style={{background:"var(--surface)",borderRadius:"var(--radius)",border:"1px solid var(--border)",overflow:"hidden"}}>
+              <div style={{padding:"11px 14px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",background:"var(--surface2)"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:16}}>✦</span>
+                  <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>Three Good Things</span>
+                </div>
+                <span style={{fontSize:11,color:"var(--text-dim)"}}>
+                  {getThings(selDs).filter(t=>t.trim()).length}/3
+                </span>
+              </div>
+              <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}}>
+                <p style={{fontSize:11,color:"var(--text-dim)",lineHeight:1.5,marginBottom:2}}>
+                  Name three things that went well today — small or large. Be specific.
+                </p>
+                {[0,1,2].map(idx => {
+                  const val = getThings(selDs)[idx] || "";
+                  const filled = val.trim().length > 0;
+                  return (
+                    <div key={idx} style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                      <div style={{
+                        width:24,height:24,borderRadius:"50%",flexShrink:0,marginTop:8,
+                        display:"flex",alignItems:"center",justifyContent:"center",
+                        fontSize:11,fontWeight:700,
+                        background:filled?"var(--gold-dim)":"var(--surface2)",
+                        border:filled?"1px solid var(--gold-border)":"1px solid var(--border-md)",
+                        color:filled?"var(--gold)":"var(--text-dim)",
+                        transition:"all 0.15s",
+                      }}>{idx+1}</div>
+                      <textarea
+                        value={val}
+                        onChange={e=>setThing(selDs,idx,e.target.value)}
+                        placeholder={["Something that went well…","A moment worth noting…","Something you're grateful for…"][idx]}
+                        rows={2}
+                        style={{
+                          flex:1,background:"var(--surface2)",color:"var(--text)",
+                          border:`1px solid ${filled?"var(--gold-border)":"var(--border)"}`,
+                          borderRadius:8,padding:"8px 12px",fontSize:13,lineHeight:1.6,
+                          resize:"none",transition:"border-color 0.15s",
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {hasThings(selDs) && (
+                <div style={{padding:"8px 14px",borderTop:"1px solid var(--border)",background:"var(--surface2)"}}>
+                  <span style={{fontSize:11,color:"#1D9E75"}}>✓ saved</span>
+                </div>
+              )}
+            </div>
+
+            {/* Free-form journal card */}
+            <div style={{background:"var(--surface)",borderRadius:"var(--radius)",border:`1px solid ${isToday?"var(--gold-border)":"var(--border)"}`,overflow:"hidden"}}>
+              <div style={{padding:"11px 14px",borderBottom:"1px solid var(--border)",display:"flex",justifyContent:"space-between",alignItems:"center",background:"var(--surface2)"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:16}}>✍</span>
+                  <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>
+                    Daily Journal
+                    {isToday && <span style={{fontSize:10,fontWeight:500,color:"var(--gold)",marginLeft:8,padding:"2px 6px",background:"var(--gold-dim)",borderRadius:4}}>TODAY</span>}
+                  </span>
+                </div>
+                <div style={{display:"flex",gap:5}}>
+                  {GOALS.map(g=>{const s=getScore(selDs,g.id);return s>0?<span key={g.id} style={{fontSize:10,padding:"2px 5px",borderRadius:4,background:sc(s)+"22",color:sc(s),fontWeight:600}}>{s}</span>:null;})}
+                </div>
+              </div>
+              <div style={{padding:"14px"}}>
+                <p style={{fontSize:11,color:"var(--text-dim)",marginBottom:10,lineHeight:1.5}}>
+                  Reflect freely — wins, friction, insights. This feeds your weekly integration.
+                </p>
+                <textarea
+                  value={getJournal(selDs)}
+                  onChange={e=>setJournal(selDs,e.target.value)}
+                  placeholder="Write anything — a moment that stood out, what your meditation surfaced, a line from your reading, what you're noticing..."
+                  style={{
+                    width:"100%",minHeight:180,
+                    background:"var(--surface2)",color:"var(--text)",
+                    border:"1px solid var(--border)",borderRadius:8,
+                    padding:"12px 14px",fontSize:14,lineHeight:1.75,
+                    resize:"vertical",
+                  }}
+                />
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
+                  <span style={{fontSize:11,color:"var(--text-dim)"}}>
+                    {getJournal(selDs).trim().split(/\s+/).filter(Boolean).length || 0} words
+                  </span>
+                  {getJournal(selDs) && <span style={{fontSize:11,color:"#1D9E75"}}>✓ saved</span>}
+                </div>
+              </div>
+              {/* Other entries strip */}
+              <div style={{borderTop:"1px solid var(--border)",padding:"10px 14px",background:"var(--surface2)"}}>
+                <div style={{fontSize:10,color:"var(--text-dim)",marginBottom:8,fontWeight:500,letterSpacing:"0.5px",textTransform:"uppercase"}}>This week</div>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                  {wdates.map((d,i)=>{
+                    const ds=tds(d);
+                    const j=getJournal(ds);
+                    const tgt=hasThings(ds);
+                    const isCur=i===selDay;
+                    const hasContent = j||tgt;
+                    return (
+                      <button key={i} onClick={()=>setSelDay(i)} style={{
+                        fontSize:11,padding:"4px 10px",borderRadius:6,cursor:"pointer",
+                        border:isCur?"1px solid var(--gold)":"1px solid var(--border-md)",
+                        background:isCur?"var(--gold-dim)":"transparent",
+                        color:isCur?"var(--gold)":hasContent?"var(--text-muted)":"var(--text-dim)",
+                      }}>
+                        {DAYS_SHORT[i]}{tgt?" ✦":""}{j?" ✓":""}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── WEEKLY REVIEW TAB ── */}
+        {tab==="weekly" && (
+          <div style={{padding:"12px 14px"}}>
+            {integrations[weekKey] ? (
+              <>
+                <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"18px 16px",marginBottom:12}}>
+                  {renderMd(integrations[weekKey])}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={generate} disabled={generating} style={{flex:1,padding:"12px",borderRadius:"var(--radius-sm)",border:"1px solid var(--border-md)",background:"var(--surface)",color:"var(--text-muted)",fontSize:13,cursor:generating?"not-allowed":"pointer",opacity:generating?0.5:1}}>
+                    {generating?<><span className="spin">◌</span> Regenerating…</>:"↺  Regenerate"}
+                  </button>
+                  <button onClick={()=>setShowApiEdit(true)} style={{padding:"12px 14px",borderRadius:"var(--radius-sm)",border:"1px solid var(--border)",background:"transparent",color:"var(--text-dim)",fontSize:12,cursor:"pointer"}}>
+                    API Key
+                  </button>
+                </div>
+                {genError && <p style={{fontSize:12,color:"#E24B4A",marginTop:10,lineHeight:1.5}}>{genError}</p>}
+              </>
+            ) : (
+              <div style={{background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"var(--radius)",padding:"28px 20px",textAlign:"center"}}>
+                <div style={{fontSize:32,marginBottom:12}}>◎</div>
+                <div style={{fontSize:15,fontWeight:600,marginBottom:8}}>Weekly Integration</div>
+                <p style={{fontSize:13,color:"var(--text-muted)",lineHeight:1.65,marginBottom:20,maxWidth:280,margin:"0 auto 20px"}}>
+                  Claude will read all seven days of scores and journal entries and write a structured reflection — ready for your Sunday call.
+                </p>
+
+                {/* Week data snapshot */}
+                <div style={{display:"flex",gap:5,justifyContent:"center",marginBottom:20}}>
+                  {wdates.map((d,i)=>{
+                    const ds=tds(d); const avg=getDayAvg(ds); const hasJ=!!getJournal(ds); const hasTgt=hasThings(ds);
+                    return (
+                      <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:36,padding:"6px 4px",borderRadius:7,background:"var(--surface2)",border:"1px solid var(--border)"}}>
+                        <div style={{fontSize:9,color:"var(--text-dim)",fontWeight:500}}>{DAYS_SHORT[i]}</div>
+                        <div style={{width:10,height:10,borderRadius:"50%",background:avg>0?sc(avg):"var(--border)"}}/>
+                        <div style={{display:"flex",gap:2}}>
+                          {hasTgt && <div style={{width:4,height:4,borderRadius:"50%",background:"var(--gold)"}} title="Three Good Things"/>}
+                          {hasJ && <div style={{width:4,height:4,borderRadius:"50%",background:"var(--text-dim)"}} title="Journal"/>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <button onClick={generate} disabled={generating} style={{
+                  padding:"13px 28px",borderRadius:"var(--radius-sm)",border:"none",
+                  background:generating?"var(--surface2)":"var(--gold)",
+                  color:generating?"var(--text-muted)":"#1a1600",
+                  fontSize:14,fontWeight:700,cursor:generating?"not-allowed":"pointer",
+                  letterSpacing:"-0.2px",width:"100%",maxWidth:280,
+                }}>
+                  {generating?<><span className="spin">◌</span>  Generating…</>:"Generate Weekly Integration"}
+                </button>
+
+                {!apiKey && (
+                  <p style={{fontSize:11,color:"var(--text-dim)",marginTop:12}}>
+                    No API key set. <button onClick={()=>setShowApiEdit(true)} style={{background:"none",border:"none",color:"var(--gold)",fontSize:11,cursor:"pointer",textDecoration:"underline"}}>Add one here.</button>
+                  </p>
+                )}
+                {genError && <p style={{fontSize:12,color:"#E24B4A",marginTop:12,lineHeight:1.5}}>{genError}</p>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE = 'wt-v1';
+    const ASSETS = [location.href];
+    self.addEventListener('install', e => {
+      e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+      self.skipWaiting();
+    });
+    self.addEventListener('activate', e => {
+      e.waitUntil(clients.claim());
+    });
+    self.addEventListener('fetch', e => {
+      if (e.request.url.includes('anthropic.com')) return;
+      e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+    });
+  `;
+  const blob = new Blob([swCode], {type:'text/javascript'});
+  const swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl).catch(()=>{});
+}
+</script>
+</body>
+</html>
